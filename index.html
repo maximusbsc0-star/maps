@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<html lang="ta">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Live World Map</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+<style>
+  :root{--bg:#0e1a24;--panel:#13232f;--ink:#e8f1f5;--mute:#8fa6b4;--acc:#3fd0c9;--line:#25404f}
+  *{box-sizing:border-box}
+  html,body{height:100%;margin:0;background:var(--bg);color:var(--ink);font-family:system-ui,-apple-system,"Segoe UI",sans-serif}
+  #map{position:absolute;inset:0}
+  #hint{position:absolute;top:12px;left:50%;transform:translateX(-50%);z-index:500;background:var(--panel);border:1px solid var(--line);padding:8px 14px;border-radius:999px;font-size:14px}
+  #panel{position:absolute;z-index:600;background:var(--panel);border:1px solid var(--line);overflow:auto;
+    left:0;right:0;bottom:0;max-height:68%;border-radius:16px 16px 0 0;transform:translateY(105%);transition:transform .25s}
+  #panel.open{transform:none}
+  @media(min-width:800px){#panel{left:auto;top:0;right:0;bottom:0;width:400px;max-height:none;border-radius:0;transform:translateX(105%)}#panel.open{transform:none}}
+  .in{padding:16px}
+  h1{font-size:20px;margin:0 28px 2px 0;line-height:1.25}
+  .sub{color:var(--mute);font-size:13px;margin-bottom:12px}
+  #close{position:absolute;top:10px;right:12px;background:none;border:0;color:var(--ink);font-size:26px;cursor:pointer}
+  .wx{display:grid;grid-template-columns:repeat(2,1fr);gap:8px;margin-bottom:14px}
+  .wx div{background:#0e1a24;border:1px solid var(--line);border-radius:10px;padding:8px 10px}
+  .wx b{display:block;font-size:20px}
+  .wx span{font-size:12px;color:var(--mute)}
+  h2{font-size:14px;margin:14px 0 6px;color:var(--acc)}
+  iframe{width:100%;height:240px;border:1px solid var(--line);border-radius:10px;background:#000}
+  .cams{display:grid;gap:10px}
+  .cam a{color:var(--ink);text-decoration:none}
+  .cam img{width:100%;border-radius:10px;display:block}
+  a.btn{display:inline-block;margin:4px 6px 0 0;padding:8px 12px;border-radius:8px;background:var(--acc);color:#06222a;font-weight:600;text-decoration:none;font-size:14px}
+  .note{font-size:12px;color:var(--mute);margin-top:10px}
+  .leaflet-container{background:#0b1620}
+</style>
+</head>
+<body>
+<div id="map"></div>
+<div id="hint">Map-la entha edaththaiyum thottu paarunga</div>
+
+<div id="panel">
+  <button id="close" aria-label="Close">×</button>
+  <div class="in" id="content"></div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script>
+/* OPTIONAL: Windy Webcams API key (free) -> https://api.windy.com/keys
+   Key podaalaa live webcam photos varaadhu; YouTube live-cam search link mattum varum. */
+const WINDY_KEY = "";
+
+const map = L.map('map', {worldCopyJump:true, minZoom:2}).setView([20, 78], 3);
+L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+  {attribution:'Imagery © Esri', maxZoom:18}).addTo(map);
+L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}',
+  {maxZoom:18}).addTo(map);
+
+const panel = document.getElementById('panel');
+const content = document.getElementById('content');
+let marker;
+document.getElementById('close').onclick = () => panel.classList.remove('open');
+
+const WMO = {0:'Clear sky',1:'Mostly clear',2:'Partly cloudy',3:'Overcast',45:'Fog',48:'Fog',51:'Light drizzle',53:'Drizzle',55:'Heavy drizzle',
+ 61:'Light rain',63:'Rain',65:'Heavy rain',71:'Light snow',73:'Snow',75:'Heavy snow',80:'Rain showers',81:'Rain showers',82:'Violent showers',95:'Thunderstorm',96:'Thunderstorm',99:'Thunderstorm'};
+
+map.on('click', async e => {
+  const lat = +e.latlng.lat.toFixed(4);
+  const lon = +(((e.latlng.lng + 540) % 360) - 180).toFixed(4);
+  if (marker) marker.remove();
+  marker = L.circleMarker(e.latlng, {radius:9, color:'#3fd0c9', weight:3, fillOpacity:.2}).addTo(map);
+  document.getElementById('hint').style.display = 'none';
+
+  content.innerHTML = '<h1>Loading…</h1><div class="sub">'+lat+', '+lon+'</div>';
+  panel.classList.add('open');
+
+  const [name, wx] = await Promise.all([geocode(lat, lon), weather(lat, lon)]);
+  const q = encodeURIComponent(name.short);
+  const windy = `https://embed.windy.com/embed2.html?lat=${lat}&lon=${lon}&detailLat=${lat}&detailLon=${lon}&zoom=7&level=surface&overlay=satellite&menu=&message=true&marker=true&calendar=now&type=map&location=coordinates&metricWind=km%2Fh&metricTemp=%C2%B0C`;
+
+  content.innerHTML = `
+    <h1>${esc(name.short)}</h1>
+    <div class="sub">${esc(name.full)}<br>${lat}, ${lon}</div>
+    ${wx ? `<div class="wx">
+      <div><b>${wx.temp}°C</b><span>${wx.desc}</span></div>
+      <div><b>${wx.time}</b><span>Local time · ${wx.day ? 'Pagal' : 'Raa'}</span></div>
+      <div><b>${wx.wind} km/h</b><span>Wind</span></div>
+      <div><b>${wx.cloud}%</b><span>Cloud cover</span></div></div>` : '<p>Weather kidaikala.</p>'}
+    <h2>Live satellite / cloud view</h2>
+    <iframe src="${windy}" loading="lazy" title="Live satellite"></iframe>
+    <h2>Live webcams</h2>
+    <div class="cams" id="cams">Thedikitu irukken…</div>
+    <a class="btn" href="https://www.youtube.com/results?search_query=${q}+live+cam&sp=EgJAAQ%253D%253D" target="_blank" rel="noopener">YouTube live cams</a>
+    <a class="btn" href="https://www.windy.com/webcams/${lat}/${lon}" target="_blank" rel="noopener">Windy webcams</a>
+    <div class="note">Satellite view near-live (10–30 min). Webcam ellaa edaththulayum irukaadhu — nearest cam mattum kaattum.</div>`;
+  webcams(lat, lon);
+});
+
+async function geocode(lat, lon){
+  try{
+    const r = await fetch(`https://nominatim.openstreetmap.org/reverse?format=jsonv2&zoom=10&accept-language=en&lat=${lat}&lon=${lon}`);
+    const j = await r.json();
+    if (j.error) return {short:'Open ocean / unnamed area', full:''};
+    const a = j.address || {};
+    const s = a.city || a.town || a.village || a.county || a.state || a.country || j.name || 'Unknown place';
+    return {short:s, full:j.display_name || ''};
+  }catch(e){ return {short:'Selected place', full:''}; }
+}
+
+async function weather(lat, lon){
+  try{
+    const r = await fetch(`https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&current=temperature_2m,weather_code,wind_speed_10m,cloud_cover,is_day&timezone=auto`);
+    const j = await r.json(), c = j.current;
+    return {temp:Math.round(c.temperature_2m), desc:WMO[c.weather_code]||'—', wind:Math.round(c.wind_speed_10m),
+            cloud:c.cloud_cover, day:c.is_day===1, time:c.time.slice(11,16)};
+  }catch(e){ return null; }
+}
+
+async function webcams(lat, lon){
+  const box = document.getElementById('cams');
+  if (!WINDY_KEY){ box.textContent = 'Webcam photos kaana WINDY_KEY podanum (free). Keela irukkura buttons use pannunga.'; return; }
+  try{
+    const r = await fetch(`https://api.windy.com/webcams/api/v3/webcams?nearby=${lat},${lon},100&limit=3&include=images,player,location`,
+      {headers:{'x-windy-api-key':WINDY_KEY}});
+    const j = await r.json();
+    if (!j.webcams || !j.webcams.length){ box.textContent = '100 km-kulla webcam illa.'; return; }
+    box.innerHTML = j.webcams.map(w => `<div class="cam"><a href="${w.player.live || w.player.day}" target="_blank" rel="noopener">
+      <img src="${w.images.current.preview}" alt=""><div>${esc(w.title)}</div></a></div>`).join('');
+  }catch(e){ box.textContent = 'Webcam load aagala.'; }
+}
+
+function esc(s){ return String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+</script>
+</body>
+</html>
